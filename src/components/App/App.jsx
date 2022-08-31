@@ -1,116 +1,96 @@
-import { Component } from 'react';
+import { useState, useEffect } from 'react';
 import { animateScroll } from 'react-scroll';
-import { ToastContainer } from 'react-toastify';
 import { toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { searchByName } from 'api/searchImgsApi';
-import { SearchBar, ImageGallery, Button, Loader, Modal } from 'components';
-import { Section } from './App.styled';
+import { SearchBar, ImageGallery, Button, Loader } from 'components';
 
-export class App extends Component {
-  state = {
-    search: '',
-    images: [],
-    page: 1,
-    showLoader: false,
-    showLoadMore: false,
-    showModal: false,
-    activeImgIdx: null,
-    error: null,
-  };
+export const App = () => {
+  const [images, setImages] = useState([]);
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [error, setError] = useState(null);
 
-  handleSearchChange = ({ search }) => {
-    this.setState({ search: search.trim(), page: 1, images: [] });
-  };
+  const [endContent, setEndContent] = useState(true);
+  const [status, setStatus] = useState('idle');
 
-  componentDidUpdate(prevProps, prevState) {
-    const { page, search } = this.state;
-    const { handlePhotosAdd } = this;
-
-    if (prevState.search !== search || prevState.page !== page) {
-      handlePhotosAdd(search, page);
+  useEffect(() => {
+    if (search === '') {
+      return;
     }
+
+    setStatus('pending');
+
+    async function fetchImages() {
+      try {
+        const {
+          data: { totalHits, hits },
+          config: {
+            params: { per_page },
+          },
+        } = await searchByName(search, page);
+
+        if (hits.length === 0) {
+          toast('Nothing was found');
+        }
+
+        const isEnd = page < Math.ceil(totalHits / per_page);
+        setEndContent(isEnd);
+
+        setImages(s => [...s, ...hits]);
+        setStatus('resolved');
+        animateScroll.scrollToBottom();
+      } catch (error) {
+        setError(error);
+        setStatus('rejected');
+      }
+    }
+    fetchImages();
+  }, [page, search]);
+
+  const handleSearchChange = ({ query }) => {
+    if (query === search) {
+      return toast('You’re already watching this');
+    }
+    setImages([]);
+    setSearch(query.trim());
+    setPage(1);
+  };
+
+  if (status === 'idle') {
+    return <SearchBar onSubmit={handleSearchChange} />;
   }
 
-  handlePhotosAdd = async (query, page) => {
-    this.setState({ showLoader: true, showLoadMore: false });
-
-    try {
-      const {
-        data: { totalHits, hits },
-        config: {
-          params: { per_page },
-        },
-      } = await searchByName(query, page);
-
-      if (hits.length === 0) {
-        toast('Nothing was found');
-      }
-
-      const showLoadMore = page < Math.ceil(totalHits / per_page);
-
-      this.setState(prev => ({
-        images: [...prev.images, ...hits],
-        showLoadMore,
-      }));
-
-      animateScroll.scrollToBottom();
-    } catch (error) {
-      this.setState({ error });
-    } finally {
-      this.setState({ showLoader: false });
-    }
-  };
-
-  handleLoadMore = () => {
-    this.setState(prev => ({ page: prev.page + 1 }));
-  };
-
-  toggleModal = () => {
-    this.setState(({ showModal }) => ({
-      showModal: !showModal,
-    }));
-  };
-
-  setActiveIndex = activeImgIdx => {
-    this.setState({ activeImgIdx });
-  };
-
-  render() {
-    const { showLoader, showLoadMore, showModal, images, activeImgIdx, error } =
-      this.state;
-    const { handleLoadMore, toggleModal, setActiveIndex, handleSearchChange } =
-      this;
-
+  if (status === 'pending') {
     return (
       <>
-        <Section>
-          <SearchBar onSubmit={handleSearchChange} />
-          {error && <p>{error.message}</p>}
-          {images.length > 0 && (
-            <ImageGallery
-              images={images}
-              activeIndex={setActiveIndex}
-              toggleModal={toggleModal}
-            />
-          )}
-          {showLoader && <Loader />}
-          {showLoadMore && (
-            <Button type="button" onClick={handleLoadMore}>
-              Load more
-            </Button>
-          )}
-          {showModal && (
-            <Modal toggleModal={toggleModal}>
-              <img
-                src={images[activeImgIdx].largeImageURL}
-                alt={images[activeImgIdx].tags}
-              />
-            </Modal>
-          )}
-        </Section>
-        <ToastContainer autoClose={2500} />
+        <SearchBar onSubmit={handleSearchChange} />
+        <ImageGallery images={images} />
+        <Loader />
       </>
     );
   }
-}
+
+  if (status === 'rejected') {
+    return (
+      <>
+        <SearchBar onSubmit={handleSearchChange} />
+        <p style={{ textAlign: 'center', fontSize: '30px' }}>{error.message}</p>
+      </>
+    );
+  }
+
+  if (status === 'resolved') {
+    return (
+      <>
+        <SearchBar onSubmit={handleSearchChange} />
+        <ImageGallery images={images} />
+        {endContent && (
+          <Button type="button" onClick={() => setPage(s => s + 1)}>
+            Load more
+          </Button>
+        )}
+      </>
+    );
+  }
+};
